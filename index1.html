@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta charset="UTF-8">
+    <title>WebAR 照片變影片 Demo</title>
+
+    <!-- 1. 載入 A-Frame 核心函式庫 -->
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+    
+    <!-- 2. 載入 MindAR 的 A-Frame 整合函式庫 (用於圖像追蹤) -->
+    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+
+    <style>
+        /* 介面美化：讓掃描提示更友善 */
+        body {
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+        }
+        /* 掃描提示 UI 的樣式 */
+        .scanning-ui {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            z-index: 10000;
+            transition: opacity 0.5s;
+        }
+        .scanning-ui p {
+            font-size: 1.2em;
+            margin: 0;
+            padding: 1em;
+        }
+        .scanning-ui.hidden {
+            opacity: 0;
+            pointer-events: none; /* 隱藏時不阻擋點擊 */
+        }
+    </style>
+</head>
+<body>
+    <!-- 掃描提示畫面，辨識成功後會自動隱藏 -->
+    <div id="scanning-ui" class="scanning-ui">
+        <p>請將相機對準指定的圖片</p>
+        <img src="https://cdn.glitch.global/08c3a14a-f3d9-4843-96b5-534b4c7329b3/taipei101-target.jpg?v=1720876878368" width="200" style="border: 2px solid white; margin-top: 20px;"/>
+    </div>
+
+    <!-- 
+      3. AR 場景設定 (a-scene)
+      - mindar-image: 這是 MindAR 的核心組件
+      - imageTargetSrc: 指定 AR 辨識資料檔(.mind)的路徑。這個檔案是從目標圖片編譯而來的。
+      - uiScanning: 指定掃描提示畫面的 CSS 選擇器，MindAR 會自動控制其顯示與隱藏。
+      - vr-mode-ui & device-orientation-permission-ui: 關閉我們不需要的 VR 模式和權限請求 UI。
+    -->
+    <a-scene mindar-image="imageTargetSrc: https://cdn.glitch.global/08c3a14a-f3d9-4843-96b5-534b4c7329b3/targets.mind?v=1720876798832; uiScanning: #scanning-ui;" 
+             vr-mode-ui="enabled: false" 
+             device-orientation-permission-ui="enabled: false"
+             renderer="colorManagement: true">
+        
+        <!-- 設置 AR 攝影機 -->
+        <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+        
+        <!-- 
+          4. 設置目標物件 (a-entity)
+          - mindar-image-target: 將這個實體綁定到辨識目標上。
+          - targetIndex="0": 表示對應到 .mind 檔案中的第一個目標圖片。
+        -->
+        <a-entity id="target" mindar-image-target="targetIndex: 0">
+            <!-- 
+              將影片作為材質貼到一個平面(a-video)上
+              - src: 指定影片的路徑。
+              - width/height: 設定平面的寬高，這裡的比例(1:0.667)與目標圖片的長寬比一致，確保影片不變形。
+              - position/rotation: 微調影片出現的位置與角度。
+              - autoplay, loop, muted: 影片屬性，為符合瀏覽器政策，通常設為自動播放、循環、靜音。
+            -->
+            <a-video id="video-player"
+                     src="#video-asset"
+                     width="1" 
+                     height="0.667"
+                     position="0 0 0"
+                     rotation="0 0 0"
+                     autoplay="false" 
+                     loop="true"
+                     muted>
+            </a-video>
+        </a-entity>
+
+        <!-- 5. 資源預載入 (a-assets) -->
+        <!-- 將所有需要用到的外部資源(圖片、影片、模型等)放在這裡，可以提升載入效能。 -->
+        <a-assets>
+             <video id="video-asset" src="https://cdn.glitch.global/08c3a14a-f3d9-4843-96b5-534b4c7329b3/taipei101-video.mp4?v=1720876802181" preload="auto" muted playsinline></video>
+        </a-assets>
+
+    </a-scene>
+
+    <!-- 6. 控制影片播放的 JavaScript -->
+    <script>
+        // 使用 DOMContentLoaded 確保在嘗試選取元素前，HTML 結構已載入
+        document.addEventListener('DOMContentLoaded', () => {
+            const targetEntity = document.querySelector('#target');
+            const videoPlayer = document.querySelector('#video-player');
+
+            // 這是關鍵的修正：
+            // 我們不直接在 DOM 載入後就去抓取影片材質，
+            // 而是監聽 a-video 實體 (videoPlayer) 的 'loaded' 事件。
+            // 這個事件確保 A-Frame 已經處理完這個實體，並且其組件 (如 material) 都已準備就緒。
+            // 這可以避免 'Cannot read properties of undefined (reading 'material')' 的錯誤。
+            videoPlayer.addEventListener('loaded', () => {
+                // 'loaded' 事件觸發後，我們可以安全地取得影片元素
+                const video = videoPlayer.components.material.material.map.image;
+
+                // 當 MindAR 辨識到目標時，會觸發 'targetFound' 事件
+                targetEntity.addEventListener('targetFound', () => {
+                    console.log("偵測到目標！");
+                    // 確保 video 存在再執行播放
+                    if (video) video.play();
+                });
+
+                // 當鏡頭移開，目標消失時，會觸發 'targetLost' 事件
+                targetEntity.addEventListener('targetLost', () => {
+                    console.log("目標消失！");
+                    // 確保 video 存在再執行暫停
+                    if (video) video.pause();
+                });
+            });
+        });
+    </script>
+</body>
+</html>
